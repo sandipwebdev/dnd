@@ -1,0 +1,329 @@
+import React, { useState, useEffect, useRef } from 'react'
+import { useDrag, useDrop, DndProvider } from 'react-dnd'
+import { HTML5Backend } from 'react-dnd-html5-backend'
+import { motion, AnimatePresence } from 'framer-motion'
+import './App.css'
+
+const ItemType = 'COLUMN'
+
+const DraggableColumn = ({ column, index, moveColumn, section }) => {
+  const ref = useRef(null)
+
+  const [{ isDragging }, drag] = useDrag({
+    type: ItemType,
+    item: { index, section, id: column.id },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+  })
+
+  const [, drop] = useDrop({
+    accept: ItemType,
+    hover: (draggedItem, monitor) => {
+      if (!ref.current) return
+
+      const hoverBoundingRect = ref.current.getBoundingClientRect()
+      const hoverMiddleY = (hoverBoundingRect.bottom - hoverBoundingRect.top) / 2
+      const clientOffset = monitor.getClientOffset()
+      const hoverClientY = clientOffset.y - hoverBoundingRect.top
+
+      if (draggedItem.section === section && draggedItem.index !== index) {
+        if (
+          (draggedItem.index < index && hoverClientY > hoverMiddleY) ||
+          (draggedItem.index > index && hoverClientY < hoverMiddleY)
+        ) {
+          moveColumn(draggedItem.index, index, section, section)
+          draggedItem.index = index
+        }
+      }
+    },
+  })
+
+  drag(drop(ref))
+
+  return (
+    <motion.tr
+      ref={ref}
+      className={`table-row ${isDragging ? 'dragging' : ''}`}
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+    >
+      <td className="table-cell">{column.name}</td>
+      <td className="table-cell">
+        {section === 'hidden' ? (
+          <button className="add-button" onClick={() => moveColumn(index, null, 'hidden', 'visible')}>
+            Add
+          </button>
+        ) : (
+          <button className="remove-button" onClick={() => moveColumn(index, null, 'visible', 'hidden')}>
+            Remove
+          </button>
+        )}
+      </td>
+    </motion.tr>
+  )
+}
+
+const DroppableSection = ({ title, description, columns, section, moveColumn }) => {
+  const [, drop] = useDrop({
+    accept: ItemType,
+    drop: (draggedItem) => {
+      if (draggedItem.section !== section) {
+        moveColumn(draggedItem.index, columns.length, draggedItem.section, section)
+        draggedItem.section = section
+      }
+    },
+  })
+
+  return (
+    <div className="column-container" ref={drop}>
+      <h3 className="column-title">{title}</h3>
+      <p className="column-description">{description}</p>
+      <table className="column-table">
+        <tbody>
+          <AnimatePresence>
+            {columns.length > 0 ? (
+              columns.map((column, index) => (
+                <DraggableColumn
+                  key={column.id}
+                  column={column}
+                  index={index}
+                  moveColumn={moveColumn}
+                  section={section}
+                />
+              ))
+            ) : (
+              <motion.tr
+                className="empty-placeholder"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+              >
+                <td className="table-cell" colSpan="2">
+                  Drag items here
+                </td>
+              </motion.tr>
+            )}
+          </AnimatePresence>
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const CustomizeColumns = () => {
+  const defaultColumns = [
+    { id: 1, name: 'Initiative', visible: true },
+    { id: 2, name: 'Fleet', visible: true },
+    { id: 3, name: 'BU owner', visible: true },
+    { id: 4, name: 'Portfolio type', visible: true },
+    { id: 5, name: 'Current status', visible: true },
+    { id: 6, name: 'Current estimate', visible: true },
+    { id: 7, name: 'Actual cost', visible: false },
+    { id: 8, name: 'Start date', visible: false },
+    { id: 9, name: 'End date', visible: false },
+    { id: 10, name: 'Last updated', visible: false },
+  ]
+
+  const [columns, setColumns] = useState(() => {
+    const savedColumns = localStorage.getItem('customColumns')
+    return savedColumns ? JSON.parse(savedColumns) : defaultColumns
+  })
+
+  useEffect(() => {
+    localStorage.setItem('customColumns', JSON.stringify(columns))
+  }, [columns])
+
+  const moveColumn = (fromIndex, toIndex, fromSection, toSection) => {
+    setColumns((prevColumns) => {
+      let visibleCols = prevColumns.filter((col) => col.visible)
+      let hiddenCols = prevColumns.filter((col) => !col.visible)
+
+      let fromList = fromSection === 'visible' ? visibleCols : hiddenCols
+      let toList = toSection === 'visible' ? visibleCols : hiddenCols
+
+      const [movedItem] = fromList.splice(fromIndex, 1)
+      movedItem.visible = toSection === 'visible'
+
+      if (toIndex !== null) {
+        toList.splice(toIndex, 0, movedItem)
+      } else {
+        toList.push(movedItem)
+      }
+
+      return [...visibleCols, ...hiddenCols]
+    })
+  }
+
+  return (
+    <DndProvider backend={HTML5Backend}>
+      <div className="modal-overlay">
+        <div className="modal-container">
+          <div className="modal-header">
+            <h2 className="modal-title">Customize columns</h2>
+            <button className="close-button">X</button>
+          </div>
+
+          <div className="modal-body">
+            <DroppableSection
+              title="Hidden columns"
+              description="Drag or click 'Add' to show in table view."
+              columns={columns.filter((col) => !col.visible)}
+              section="hidden"
+              moveColumn={moveColumn}
+            />
+
+            <DroppableSection
+              title="Visible columns"
+              description="Drag or click 'Remove' to hide from table view."
+              columns={columns.filter((col) => col.visible)}
+              section="visible"
+              moveColumn={moveColumn}
+            />
+          </div>
+
+          <div className="modal-footer">
+            <button
+              className="reset-button"
+              onClick={() => {
+                setColumns(defaultColumns)
+                localStorage.setItem('customColumns', JSON.stringify(defaultColumns))
+              }}
+            >
+              Reset to default
+            </button>
+            <button className="cancel-button">Cancel</button>
+            <button className="apply-button">Apply</button>
+          </div>
+        </div>
+      </div>
+    </DndProvider>
+  )
+}
+
+export default CustomizeColumns
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-container {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  padding: 20px;
+  width: 75%;
+  max-width: 600px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modal-title {
+  font-size: 1.2rem;
+  font-weight: bold;
+}
+
+.close-button {
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+  font-size: 1.2rem;
+}
+
+.modal-body {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.column-container {
+  /* ... */
+}
+
+.column-title {
+  font-size: 1rem;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.column-description {
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.column-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-row {
+  border-bottom: 1px solid #eee;
+}
+
+.table-cell {
+  padding: 10px;
+  text-align: left;
+}
+
+.add-button {
+  color: blue;
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+}
+
+.remove-button {
+  color: red;
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.reset-button,
+.cancel-button,
+.apply-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  margin-left: 10px;
+}
+
+.reset-button {
+  color: #666;
+}
+
+.cancel-button {
+  color: #666;
+}
+
+.apply-button {
+  background-color: #007bff;
+  color: #fff;
+  font-weight: bold;
+}
+
